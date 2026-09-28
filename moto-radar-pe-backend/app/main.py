@@ -1,6 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 from fastapi import APIRouter, FastAPI, Depends, HTTPException, BackgroundTasks, Query
+from fastapi.middleware.cors import CORSMiddleware
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -28,6 +29,9 @@ async def lifespan(app: FastAPI):
     sch.shutdown()
 
 app = FastAPI(title="Moto Radar PE", lifespan=lifespan)
+# CORS liberado geral: a API é só leitura pública (sem auth no modo pessoal) e
+# precisa ser chamada do navegador (zapp.run, Flutter Web) em outro domínio.
+app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 api = APIRouter(dependencies=[Depends(current_user)])  # tudo aqui exige JWT
 
 def _dict(m: Moto):
