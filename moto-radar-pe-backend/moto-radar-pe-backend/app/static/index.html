@@ -1,0 +1,182 @@
+<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Moto Radar PE</title>
+<style>
+/* layout: top stat strip, filter bar, single-column card feed (max 640px) */
+:root{
+  --bg:#faf8f5; --surface:#ffffff; --border:#e6e0d4; --fg:#211c16; --muted:#7a7264;
+  --accent:#d9601a; --accent-fg:#ffffff; --chip-bg:#f4ede0; --good:#2f8f5b; --warn:#c98a1c;
+  --font-display:'Space Mono',ui-monospace,monospace; --font-body:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;
+}
+@media (prefers-color-scheme: dark){
+  :root{
+    --bg:#17140f; --surface:#211c16; --border:#3a3227; --fg:#f2ece0; --muted:#a89c88;
+    --accent:#f0813a; --accent-fg:#17140f; --chip-bg:#2c2519; --good:#5cc98a; --warn:#e0ab4a;
+    color-scheme:dark;
+  }
+}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--font-body);margin:0;padding:20px 16px;min-width:0}
+.wrap{max-width:640px;margin:0 auto}
+h1{font-family:var(--font-display);font-size:1.3rem;margin:0 0 4px;letter-spacing:-.02em}
+.sub{color:var(--muted);font-size:.85rem;margin:0 0 16px}
+.stats{display:grid;grid-template-columns:repeat(2,1fr);gap:10px;margin-bottom:16px}
+@media (min-width:480px){.stats{grid-template-columns:repeat(4,1fr)}}
+.stat{background:var(--surface);border:1px solid var(--border);border-radius:10px;padding:12px}
+.stat .label{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.04em}
+.stat .value{font-family:var(--font-display);font-size:1.1rem;margin-top:4px;font-variant-numeric:tabular-nums}
+.bar{display:flex;gap:8px;align-items:center;margin-bottom:16px;flex-wrap:wrap}
+input[type=text]{flex:1;min-width:160px;background:var(--surface);border:1px solid var(--border);border-radius:8px;padding:9px 12px;color:var(--fg);font-family:var(--font-body);font-size:.85rem}
+button{font-family:var(--font-body);font-weight:600;font-size:.82rem;border:none;border-radius:8px;padding:9px 16px;cursor:pointer}
+button.primary{background:var(--accent);color:var(--accent-fg)}
+button.ghost{background:var(--chip-bg);color:var(--fg)}
+button:disabled{opacity:.5;cursor:default}
+#status{font-size:.8rem;color:var(--muted);margin-bottom:12px;min-height:1.2em}
+#status.err{color:#c94f4f}
+#status.ok{color:var(--good)}
+.card{background:var(--surface);border:1px solid var(--border);border-radius:12px;padding:16px;margin-bottom:12px}
+.card h3{margin:0 0 8px;font-size:1rem}
+.rowline{display:flex;flex-wrap:wrap;gap:16px;margin-bottom:10px}
+.rowline .cell{min-width:0}
+.rowline .cell .l{color:var(--muted);font-size:.7rem;text-transform:uppercase;letter-spacing:.03em}
+.rowline .cell .v{font-family:var(--font-display);font-size:.9rem;font-variant-numeric:tabular-nums}
+.foot{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.chip{background:var(--chip-bg);border-radius:999px;padding:5px 10px;font-size:.75rem;display:flex;align-items:center;gap:6px}
+.dot{width:7px;height:7px;border-radius:50%;display:inline-block}
+a.open{color:var(--accent-fg);background:var(--accent);text-decoration:none;padding:7px 14px;border-radius:8px;font-size:.82rem;font-weight:600}
+.empty{text-align:center;color:var(--muted);padding:32px 12px;font-size:.9rem}
+.tabs{display:flex;gap:6px;margin-bottom:16px;border-bottom:1px solid var(--border)}
+.tab{padding:8px 4px;font-size:.85rem;color:var(--muted);cursor:pointer;border-bottom:2px solid transparent;font-weight:600;background:none;border-radius:0}
+.tab.active{color:var(--fg);border-bottom-color:var(--accent)}
+[hidden]{display:none!important}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1>Moto Radar PE</h1>
+  <p class="sub">Oportunidades de compra e revenda na OLX-PE</p>
+
+  <div id="status">Carregando…</div>
+
+  <div class="tabs">
+    <button class="tab active" data-tab="dash">Dashboard</button>
+    <button class="tab" data-tab="opp">Oportunidades</button>
+  </div>
+
+  <div id="dashPanel">
+    <div class="stats" id="stats"></div>
+    <div class="bar">
+      <button class="primary" id="buscarBtn">Buscar agora</button>
+      <button class="ghost" id="refreshDash">Atualizar</button>
+    </div>
+    <div id="dashList"></div>
+  </div>
+
+  <div id="oppPanel" hidden>
+    <div class="bar">
+      <input id="filtroModelo" type="text" placeholder="Filtrar por modelo (ex: CG 160)" />
+      <button class="ghost" id="applyFiltro">Filtrar</button>
+    </div>
+    <div id="oppList"></div>
+  </div>
+</div>
+
+<script>
+const $ = (s) => document.querySelector(s);
+
+function brl(v){ if (v==null) return '-'; const n = Math.round(v); return 'R$ ' + n.toString().replace(/\B(?=(\d{3})+(?!\d))/g, '.'); }
+function pct(v){ if (v==null) return '-'; return v.toFixed(1).replace('.', ',') + '%'; }
+function setStatus(msg, kind){ const el = $('#status'); el.textContent = msg; el.className = kind || ''; }
+
+async function api(path, opts) {
+  const r = await fetch(path, opts);
+  if (!r.ok) throw new Error('Erro ' + r.status);
+  return r.json();
+}
+
+function scoreDot(s){
+  s = s || 0;
+  const c = s >= 85 ? 'var(--good)' : (s >= 70 ? 'var(--warn)' : 'var(--muted)');
+  return `<span class="dot" style="background:${c}"></span>`;
+}
+
+function motoCard(m){
+  return `<div class="card">
+    <h3>${m.modelo || ''} ${m.ano || ''}</h3>
+    <div class="rowline">
+      <div class="cell"><div class="l">Preço</div><div class="v">${brl(m.preco)}</div></div>
+      ${m.valor_fipe!=null?`<div class="cell"><div class="l">FIPE</div><div class="v">${brl(m.valor_fipe)}</div></div>`:''}
+      ${m.desconto!=null?`<div class="cell"><div class="l">Desconto</div><div class="v">${pct(m.desconto)}</div></div>`:''}
+      ${m.lucro_estimado!=null?`<div class="cell"><div class="l">Lucro estimado</div><div class="v">${brl(m.lucro_estimado)}</div></div>`:''}
+    </div>
+    <div class="foot">
+      <span class="chip">${scoreDot(m.score)} Score ${m.score ?? '-'} · ${m.classificacao || ''}</span>
+      ${m.url ? `<a class="open" href="${m.url}" target="_blank" rel="noopener">ABRIR ANÚNCIO</a>` : ''}
+    </div>
+  </div>`;
+}
+
+async function loadDashboard(){
+  setStatus('Carregando dashboard…');
+  try {
+    const d = await api('/dashboard');
+    $('#stats').innerHTML = `
+      <div class="stat"><div class="label">Oportunidades</div><div class="value">${d.quantidade}</div></div>
+      <div class="stat"><div class="label">Média desconto</div><div class="value">${pct(d.media_desconto)}</div></div>
+      <div class="stat"><div class="label">Maior desconto</div><div class="value">${d.maior_desconto ? pct(d.maior_desconto.desconto) : '-'}</div></div>
+      <div class="stat"><div class="label">Maior lucro</div><div class="value">${d.maior_lucro ? brl(d.maior_lucro.lucro_estimado) : '-'}</div></div>
+    `;
+    $('#dashList').innerHTML = d.top20.length
+      ? d.top20.map(motoCard).join('')
+      : `<div class="empty">Nenhuma oportunidade ainda. Toque em "Buscar agora".</div>`;
+    setStatus('API online ✓', 'ok');
+  } catch (e) {
+    setStatus('Erro ao carregar: ' + e.message, 'err');
+  }
+}
+
+async function loadOportunidades(modelo){
+  const list = $('#oppList');
+  list.innerHTML = '<div class="empty">Carregando…</div>';
+  try {
+    const q = new URLSearchParams({desconto_min: '10'});
+    if (modelo) q.set('modelo', modelo);
+    const motos = await api('/motos?' + q.toString());
+    list.innerHTML = motos.length ? motos.map(motoCard).join('') : `<div class="empty">Nada encontrado.</div>`;
+  } catch (e) {
+    list.innerHTML = `<div class="empty">Erro: ${e.message}</div>`;
+  }
+}
+
+$('#buscarBtn').addEventListener('click', async () => {
+  const btn = $('#buscarBtn');
+  btn.disabled = true;
+  setStatus('Disparando busca (roda em segundo plano, demora alguns minutos)…');
+  try {
+    await api('/buscar', { method: 'POST' });
+    setStatus('Busca iniciada. Toque em "Atualizar" daqui a alguns minutos.', 'ok');
+  } catch (e) {
+    setStatus('Erro ao iniciar busca: ' + e.message, 'err');
+  }
+  btn.disabled = false;
+});
+
+$('#refreshDash').addEventListener('click', loadDashboard);
+$('#applyFiltro').addEventListener('click', () => loadOportunidades($('#filtroModelo').value.trim()));
+
+document.querySelectorAll('.tab').forEach(t => t.addEventListener('click', () => {
+  document.querySelectorAll('.tab').forEach(x => x.classList.remove('active'));
+  t.classList.add('active');
+  const isDash = t.dataset.tab === 'dash';
+  $('#dashPanel').hidden = !isDash;
+  $('#oppPanel').hidden = isDash;
+  if (!isDash) loadOportunidades($('#filtroModelo').value.trim());
+}));
+
+loadDashboard();
+</script>
+</body>
+</html>
