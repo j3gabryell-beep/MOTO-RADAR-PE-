@@ -1,7 +1,9 @@
 import logging
 from contextlib import asynccontextmanager
+from pathlib import Path
 from fastapi import APIRouter, FastAPI, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import FileResponse
 from sqlalchemy import func
 from sqlalchemy.orm import Session
 from apscheduler.schedulers.background import BackgroundScheduler
@@ -90,6 +92,14 @@ def dashboard(db: Session = Depends(get_db)):
 @app.get("/health")
 def health():
     return {"status": "ok"}
+
+# Painel web simples (dashboard + oportunidades) servido direto pela própria API,
+# assim as chamadas fetch() são same-origin e não dependem de CORS.
+_STATIC_DIR = Path(__file__).parent / "static"
+
+@app.get("/")
+def painel():
+    return FileResponse(_STATIC_DIR / "index.html")
 
 app.include_router(auth_router)
 app.include_router(api)
